@@ -12,45 +12,47 @@ _log = logging.getLogger()
 
 
 def minimax_decision(game_: T_Game) -> T_Action:
-    if is_min(game_):
+    if game_.player == -1:
         utility = max_value
         result = min
     else:
-        assert is_max(game_)
+        assert game_.player == +1
         utility = min_value
         result = max
 
     utilities = []
     for a in game_.actions():
         ply = game_.invoke(a)
-        v = utility(ply)
+        v = utility(ply, -math.inf, +math.inf)
         utilities.append((a, v))
-    return result(utilities, operator.itemgetter(1))
+
+    rv, _ = result(utilities, operator.itemgetter(1))
+    return rv
 
 
-def is_min(game_: T_Game) -> bool:
-    return game_.player == -1
-
-
-def is_max(game_: T_Game) -> bool:
-    return game_.player == +1
-
-
-def min_value(game_: T_Game) -> float:
+def min_value(game_: T_Game, alpha: float, beta: float) -> float:
     if game_.terminal_test():
         return game_.utility()
-    v = +math.inf
+
+    rv = +math.inf
     for a in game_.actions():
         ply = game_.invoke(a)
-        v = min(v, max_value(ply))
-    return v
+        rv = min(rv, max_value(ply, alpha, beta))
+        if rv <= alpha:
+            return rv
+        beta = min(beta, rv)
+    return rv
 
 
-def max_value(game_: T_Game) -> float:
+def max_value(game_: T_Game, alpha: float, beta: float) -> float:
     if game_.terminal_test():
         return game_.utility()
-    v = -math.inf
+
+    rv = -math.inf
     for a in game_.actions():
         ply = game_.invoke(a)
-        v = max(v, min_value(ply))
-    return v
+        rv = max(rv, min_value(ply, alpha, beta))
+        if rv >= beta:
+            return rv
+        alpha = max(alpha, rv)
+    return rv
