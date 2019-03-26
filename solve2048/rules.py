@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 import game
 
+#: Player. -1 for MIN, the AI. +1 for MAX, the actual player.
 Player = int
 
 #: Tuple of vertical and horizontal offset from the origin (top, left).
