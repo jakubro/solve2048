@@ -1,8 +1,11 @@
 import enum
+import math
 import random
 from typing import Dict, Iterator, List, Optional, Tuple
 
 import game
+
+Player = int
 
 #: Tuple of vertical and horizontal offset from the origin (top, left).
 Position = Tuple[int, int]
@@ -15,28 +18,57 @@ Board = Dict[Position, Optional[int]]
 class Action(enum.Enum):
     """Direction in which to move all the tile on the board."""
 
+    # min's actions
+    NEXT = enum.auto()
+
+    # max's actions
     UP = enum.auto()
     RIGHT = enum.auto()
     DOWN = enum.auto()
     LEFT = enum.auto()
 
 
-class Game2048(game.Game[Board, Action]):
+class Game2048(game.Game[Board, Player, Action]):
     """2048 game.
 
     See https://en.wikipedia.org/wiki/2048_(video_game)
     """
 
-    def __init__(self, state: Board, width: int, height: int):
+    def __init__(self, state: Board, player: Player, width: int, height: int):
         """
         :param state: Initial state.
         :param width: Width of the board.
         :param height: Height of the board.
         """
 
-        super().__init__(state)
+        super().__init__(state, player)
         self.width = width
         self.height = height
+
+    def terminal_test(self) -> bool:
+        if not self.actions():
+            return True  # min wins
+        if self._max_score() >= 2048:
+            return True  # max wins
+        return False
+
+    def utility(self) -> float:
+        score = self._max_score()
+        if self.terminal_test():
+            if score >= 2048:
+                return +math.inf
+            else:
+                return -math.inf
+        else:
+            return score
+
+    def _max_score(self) -> int:
+        # sum of all tiles
+        rv = 0
+        for v in self.state.values():
+            if v is not None:
+                rv += v
+        return rv
 
     @classmethod
     def all_actions(cls) -> List[Action]:
@@ -44,33 +76,42 @@ class Game2048(game.Game[Board, Action]):
         return list(Action)
 
     def can_invoke(self, action: Action) -> bool:
-        state = self.state
-        for row in self._rotate_board(action):
-            previous = None  # value of the last visited tile
-            for pos in row:
-                current = state[pos]
-
-                if current is not None:
-                    if previous is None:
-                        return True  # empty tiles elimination
-
-                    if current == previous:
-                        return True  # equal tiles squashing
-
-                previous = current
-        return False
+        if self.player == -1:
+            if action != action.NEXT:
+                return False
+            for v in self.state.values():
+                if v is None:
+                    return True
+            return False
+        else:
+            assert self.player == +1
+            for row in self._rotate_board(action):
+                previous = None  # value of the last visited tile
+                for pos in row:
+                    current = self.state[pos]
+                    if current is not None:
+                        if previous is None:
+                            return True  # empty tiles elimination
+                        if current == previous:
+                            return True  # equal tiles squashing
+                    previous = current
+            return False
 
     def invoke(self, action: Action) -> 'Game2048':
+        if not self.can_invoke(action):
+            raise ValueError('action')
+
         state = {**self.state}
+        if self.player == -1:
+            pos = self._random_empty_position(state, self.width, self.height)
+            state[pos] = 2
+        else:
+            assert self.player == 1
+            self._eliminate_empty_tiles(state, action)
+            self._squash_equal_tiles(state, action)
+            self._eliminate_empty_tiles(state, action)
 
-        self._eliminate_empty_tiles(state, action)
-        self._squash_equal_tiles(state, action)
-        self._eliminate_empty_tiles(state, action)
-
-        pos = self._random_empty_position(state, self.width, self.height)
-        state[pos] = 2
-
-        return Game2048(state, self.width, self.height)
+        return Game2048(state, -self.player, self.width, self.height)
 
     def _eliminate_empty_tiles(
             self,
@@ -177,9 +218,9 @@ class Game2048(game.Game[Board, Action]):
         width = kwargs.get('width')
         height = kwargs.get('height')
         state = {(i, j): None for i in range(height) for j in range(width)}
-        pos = cls._random_empty_position(state, width, height)
-        state[pos] = 2
-        return Game2048(state, **kwargs)
+        rv = Game2048(state, -1, **kwargs)
+        rv = rv.invoke(Action.NEXT)
+        return rv
 
     @classmethod
     def _random_empty_position(

@@ -2,22 +2,43 @@ import abc
 from typing import Generic, List, TypeVar
 
 T_State = TypeVar('T_State')
+T_Player = TypeVar('T_Player')
 T_Action = TypeVar('T_Action')
 
 
-class Game(Generic[T_State, T_Action]):
-    def __init__(self, state: T_State):
+class Game(Generic[T_State, T_Player, T_Action]):
+    def __init__(self, state: T_State, player: T_Player):
         """
         :param state: Initial state.
         """
 
         self._state = state
+        self._player = player
 
     @property
     def state(self) -> T_State:
         """:returns: Current state."""
 
         return self._state
+
+    @property
+    def player(self) -> T_Player:
+        """:returns: Player to take action."""
+
+        return self._player
+
+    @abc.abstractmethod
+    def terminal_test(self) -> bool:
+        """:returns: True if current state if the game is over, otherwise
+        False."""
+
+        pass
+
+    @abc.abstractmethod
+    def utility(self) -> float:
+        """:returns: Utility value for the player in the current state."""
+
+        pass
 
     @classmethod
     @abc.abstractmethod
@@ -27,7 +48,8 @@ class Game(Generic[T_State, T_Action]):
         pass
 
     def actions(self) -> List[T_Action]:
-        """:returns: List of actions applicable in the current state."""
+        """:returns: List of actions applicable for the player in the current
+        state."""
 
         rv = []
         for action in self.all_actions():
@@ -37,10 +59,11 @@ class Game(Generic[T_State, T_Action]):
 
     @abc.abstractmethod
     def can_invoke(self, action: T_Action) -> bool:
-        """Tests whether the action is applicable in the current state.
+        """Tests whether the action is applicable for player in the current
+        state.
 
         :param action: Action to test.
-        :returns: True if action is applicable in the current state,
+        :returns: True if action is applicable for player in the current state,
         otherwise False.
         """
 

@@ -54,7 +54,8 @@ def play(args: argparse.Namespace) -> None:
         else:
             continue
 
-        problem_ = problem_.invoke(action)
+        problem_ = problem_.invoke(action)  # max ply
+        problem_ = problem_.invoke(rules.Action.NEXT)  # min ply
 
 
 def setup_logging(args: argparse.Namespace) -> None:
