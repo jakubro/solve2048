@@ -1,12 +1,11 @@
 import abc
-from typing import Generic, List, TypeVar
+from typing import Any, Dict, Generic, List, TypeVar
 
 T_State = TypeVar('T_State')
 T_Player = TypeVar('T_Player')
-T_Action = TypeVar('T_Action')
 
 
-class Game(Generic[T_State, T_Player, T_Action]):
+class Game(Generic[T_State, T_Player]):
     def __init__(self, state: T_State, player: T_Player):
         """
         :param state: Initial state.
@@ -35,30 +34,35 @@ class Game(Generic[T_State, T_Player, T_Action]):
         pass
 
     @abc.abstractmethod
+    def score(self) -> float:
+        """:returns: Score for the player in the current state."""
+
+        pass
+
+    @abc.abstractmethod
     def utility(self) -> float:
         """:returns: Utility value for the player in the current state."""
 
         pass
 
-    @classmethod
     @abc.abstractmethod
-    def all_actions(cls) -> List[T_Action]:
+    def all_actions(self) -> List[Dict[str, Any]]:
         """:returns: List of all actions."""
 
         pass
 
-    def actions(self) -> List[T_Action]:
+    def actions(self) -> List[Dict[str, Any]]:
         """:returns: List of actions applicable for the player in the current
         state."""
 
         rv = []
-        for action in self.all_actions():
-            if self.can_invoke(action):
-                rv.append(action)
+        for kwargs in self.all_actions():
+            if self.can_invoke(**kwargs):
+                rv.append(kwargs)
         return rv
 
     @abc.abstractmethod
-    def can_invoke(self, action: T_Action) -> bool:
+    def can_invoke(self, **kwargs) -> bool:
         """Tests whether the action is applicable for player in the current
         state.
 
@@ -70,7 +74,7 @@ class Game(Generic[T_State, T_Player, T_Action]):
         pass
 
     @abc.abstractmethod
-    def invoke(self, action: T_Action) -> 'Game':
+    def invoke(self, **kwargs) -> 'Game':
         """Invokes action.
 
         :param action: Action to invoke.

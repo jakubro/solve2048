@@ -1,7 +1,15 @@
 import argparse
 import logging
+import random
+import sys
 
 import rules
+import search
+
+_log = logging.getLogger()
+
+random.seed(0)
+sys.setrecursionlimit(1500)
 
 
 def main() -> None:
@@ -9,10 +17,10 @@ def main() -> None:
     parser.add_argument(
         'action', choices=['solve', 'play'])
     parser.add_argument(
-        '-ww', '--width', type=int, default=5,
+        '-ww', '--width', type=int, default=3,
         help="Width of the board.")
     parser.add_argument(
-        '-hh', '--height', type=int, default=5,
+        '-hh', '--height', type=int, default=3,
         help="Height of the board.")
     parser.add_argument(
         '-v', '--verbose', action='store_true',
@@ -20,6 +28,12 @@ def main() -> None:
     parser.add_argument(
         '-vv', '--debug', action='store_true',
         help="Be even more verbose.")
+    parser.add_argument(
+        '--depth', type=int, default=10,
+        help="Number of steps to look forward. -1 for unlimited steps.")
+    parser.add_argument(
+        '--score', type=int, default=512,
+        help="Game ends when player achieves this score.")
 
     args = parser.parse_args()
     setup_logging(args)
@@ -32,30 +46,127 @@ def main() -> None:
 
 
 def solve(args: argparse.Namespace) -> None:
-    raise NotImplementedError()
+    game_ = rules.Game2048.initialize(
+        width=args.width,
+        height=args.height,
+        terminal_score=args.score)
+
+    depth = args.depth
+
+    i = 0
+    while True:
+        i += 1
+
+        utility = game_.utility()
+        score = game_.score()
+        directions = [d['direction'] for d in game_.actions()]
+
+        # max's (AI player) ply
+
+        print(f"\n{game_}")
+        print(f"\nIteration: {i}. Utility: {utility}. Score: {score}. "
+              f"Directions: {[d.name for d in directions]}")
+        if score >= args.score:
+            print(f"\n---------------------------------------------")
+            print("\nAI won!")
+            break
+
+        for d in directions:
+            temp = game_.invoke(player=+1, direction=d)
+            _log.info(f"\t{d.name}\t"
+                      f"Utility: {temp.utility()}. Score: {temp.score()}")
+
+        # if i % 10 == 0:
+        #     depth = depth + 1
+        print(f"\nDepth: {depth}")
+
+        try:
+            # action = search.minimax_decision(game_, depth=depth)
+            action = search.expectimax_decision(game_, depth=depth)
+        except KeyboardInterrupt:
+            break
+        except StopIteration:
+            print(f"\n---------------------------------------------")
+            print("\nAI lost!")
+            break
+        else:
+            print(f"\n{action['direction'].name}")
+            game_ = game_.invoke(**action)
+
+        # min's (opponent) ply
+
+        actions = game_.actions()
+        if not actions:
+            continue
+        game_ = game_.invoke(**random.choice(actions))
+
+        print(f"\n---------------------------------------------")
 
 
 def play(args: argparse.Namespace) -> None:
-    problem_ = rules.Game2048.initialize(width=args.width, height=args.height)
-    while True:
-        print(f"\n{problem_}")
-        print("\nType W for UP, A for RIGHT, S for DOWN and L for LEFT:  ",
-              end='')
+    game_ = rules.Game2048.initialize(
+        width=args.width,
+        height=args.height,
+        terminal_score=args.score)
 
+    i = 0
+    while True:
+        i += 1
+
+        utility = game_.utility()
+        score = game_.score()
+        directions = [d['direction'] for d in game_.actions()]
+
+        print(f"\n{game_}")
+        print(f"\nIteration: {i}. Utility: {utility}. Score: {score}. "
+              f"Directions: {[d.name for d in directions]}")
+        if score >= args.score:
+            print(f"\n---------------------------------------------")
+            print("\nYou won!")
+            break
+
+        for d in directions:
+            temp = game_.invoke(player=+1, direction=d)
+            _log.info(f"\t{d.name}\t"
+                      f"Utility: {temp.utility()}. Score: {temp.score()}")
+
+        # max's (player) ply
+
+        actions = game_.actions()
+        if not actions:
+            print(f"\n---------------------------------------------")
+            print("\nYou lost!")
+            break
+
+        print("\nType W for UP, A for LEFT, S for DOWN and D for RIGHT:  ",
+              end='')
         s = input().lower()
         if s == 'w':
-            action = rules.Action.UP
+            direction = rules.Direction.UP
         elif s == 's':
-            action = rules.Action.DOWN
+            direction = rules.Direction.DOWN
         elif s == 'a':
-            action = rules.Action.LEFT
+            direction = rules.Direction.LEFT
         elif s == 'd':
-            action = rules.Action.RIGHT
+            direction = rules.Direction.RIGHT
         else:
             continue
 
-        problem_ = problem_.invoke(action)  # max ply
-        problem_ = problem_.invoke(rules.Action.NEXT)  # min ply
+        try:
+            action = next(a for a in actions if a['direction'] == direction)
+        except StopIteration:
+            continue
+
+        game_ = game_.invoke(**action)
+
+        # min's (opponent) ply
+
+        actions = game_.actions()
+        if not actions:
+            continue
+        game_ = game_.invoke(**random.choice(actions))
+
+        print(f"\n---------------------------------------------")
 
 
 def setup_logging(args: argparse.Namespace) -> None:
