@@ -11,6 +11,7 @@ Player = int
 
 #: Tuple of vertical and horizontal offset from the origin (top, left).
 Position = Tuple[int, int]
+Size = Position
 
 #: Key is position of this tile on the board.
 #: Value is numerical value of the tile. None if the tile is empty.
@@ -35,18 +36,17 @@ class Game2048(game.Game[Board, Player]):
     def __init__(self,
                  state: Board,
                  player: Player,
-                 width: int,
-                 height: int,
+                 size: Size,
                  terminal_score: int):
         """
         :param state: Initial state.
-        :param width: Width of the board.
-        :param height: Height of the board.
+        :param player: Player ID.
+        :param size: Size of the board.
+        :param terminal_score: Max score when the game ends.
         """
 
         super().__init__(state, player)
-        self.width = width
-        self.height = height
+        self.size = size
         self.terminal_score = terminal_score
 
     def __hash__(self, *args, **kwargs):
@@ -54,15 +54,14 @@ class Game2048(game.Game[Board, Player]):
         if rv is None:
             self.__hashvalue = rv = hash((tuple(self.state.items()),
                                           self.player,
-                                          self.width,
-                                          self.height,
+                                          self.size,
                                           self.terminal_score))
         return rv
 
     # Heuristics
     # -------------------------------------------------------------------------
 
-    @cache.cached()
+    # @cache.cached()
     def terminal_test(self) -> bool:
         if self.score() >= self.terminal_score:
             return True  # max wins
@@ -70,30 +69,27 @@ class Game2048(game.Game[Board, Player]):
             return True  # min wins
         return False
 
-    @cache.cached()
+    # @cache.cached()
     def score(self) -> float:
         return max(0, *(x for x in self.state.values() if x is not None))
 
-    @cache.cached()
+    # @cache.cached()
     def utility(self) -> float:
         if self.score() >= self.terminal_score:
-            return 10 ** (math.log(self.terminal_score, 2) + 10)
+            return self.max_utility()
 
         if not self.actions():
-            return - (10 ** (math.log(self.terminal_score, 2) + 10))
+            return self.min_utility()
 
         powers = [int(math.log(x or 1, 2)) for _, x in self._board_as_snake()]
         inversions = self._count_inversions(tuple(powers))
 
         score = self.score()
-        log_score = math.log(self.score(), 2)
 
         return inversions * score  # * log_score
 
-    @cache.cached()
     def _count_inversions(self, arr: tuple) -> int:
         rv = 0
-        max_ = max(arr)
         add = True
         for i, a in enumerate(arr):
             for j, b in enumerate(arr):
@@ -108,17 +104,21 @@ class Game2048(game.Game[Board, Player]):
                         rv += q if add else -q
         return rv
 
-    def empty_tiles(self) -> int:
-        return len([x for x in self.state.values() if x is None])
+    def min_utility(self) -> float:
+        return - (10 ** (math.log(self.terminal_score, 2) + 10))
+
+    def max_utility(self) -> float:
+        return 10 ** (math.log(self.terminal_score, 2) + 10)
 
     # Actions
     # -------------------------------------------------------------------------
 
-    @cache.cached()
+    @cache.cached(key=lambda x: x.size)
     def all_actions(self) -> List[Dict[str, Any]]:
+        height, width = self.size
         new_tiles = [dict(player=-1, position=(i, j))
-                     for i in range(self.height)
-                     for j in range(self.width)]
+                     for i in range(height)
+                     for j in range(width)]
         directions = [dict(player=+1, direction=d) for d in Direction]
         return [*new_tiles, *directions]
 
@@ -147,7 +147,8 @@ class Game2048(game.Game[Board, Player]):
         if kwargs['player'] != +1:
             return False
         direction: Direction = kwargs['direction']
-        for row in self._rotate_board(self.height, self.width, direction):
+        height, width = self.size
+        for row in self._rotate_board(height, width, direction):
             previous = Ellipsis  # value of the last visited tile
             previous_non_empty = Ellipsis
             for pos in row:
@@ -171,8 +172,10 @@ class Game2048(game.Game[Board, Player]):
         else:
             assert self.player == 1
             state = self._invoke_max(**kwargs)
-        return Game2048(state, -self.player,
-                        self.width, self.height, self.terminal_score)
+        return Game2048(state,
+                        player=-self.player,
+                        size=self.size,
+                        terminal_score=self.terminal_score)
 
     def _invoke_min(self, **kwargs) -> Board:
         if not self.can_invoke(**kwargs):
@@ -203,7 +206,8 @@ class Game2048(game.Game[Board, Player]):
         """Move non-empty tile along the desired direction, while the empty
         tiles vanish."""
 
-        for row in self._rotate_board(self.height, self.width, direction):
+        height, width = self.size
+        for row in self._rotate_board(height, width, direction):
             empty = []  # queue of visited empty tiles
             for pos in row:
                 current = state[pos]
@@ -221,7 +225,8 @@ class Game2048(game.Game[Board, Player]):
         put on the position of the first tile, while the other tile is left
         empty."""
 
-        for row in self._rotate_board(self.height, self.width, direction):
+        height, width = self.size
+        for row in self._rotate_board(height, width, direction):
             previous = None  # value of the last visited tile
             prev_pos = None  # .. and its position
             for pos in row:
@@ -244,11 +249,12 @@ class Game2048(game.Game[Board, Player]):
         # 5 4 3
         # 6 7 8
 
+        height, width = self.size
         rv = []
         reverse = False
-        for i in range(self.height):
-            start = self.width - 1 if reverse else 0
-            stop = -1 if reverse else self.width
+        for i in range(height):
+            start = width - 1 if reverse else 0
+            stop = -1 if reverse else width
             step = -1 if reverse else +1
             for j in range(start, stop, step):
                 pos = (i, j)
@@ -315,12 +321,13 @@ class Game2048(game.Game[Board, Player]):
     # -------------------------------------------------------------------------
 
     def __str__(self):
+        height, width = self.size
         tile_width = self._max_tile_width()
         state = self.state
         rv = ""
-        for i in range(self.height):
+        for i in range(height):
             rv += "\n"
-            for j in range(self.width):
+            for j in range(width):
                 it = state[(i, j)]
                 it = self._str_tile(it)
                 rv += it.center(tile_width)
@@ -347,9 +354,8 @@ class Game2048(game.Game[Board, Player]):
     @classmethod
     def initialize(cls, **kwargs) -> 'Game2048':
         # size of the board
-        width = kwargs['width']
-        height = kwargs['height']
+        height, width = kwargs['size']
         state = {(i, j): None for i in range(height) for j in range(width)}
-        rv = Game2048(state, -1, **kwargs)
+        rv = Game2048(state, player=-1, **kwargs)
         rv = rv.invoke(**random.choice(rv.actions()))
         return rv

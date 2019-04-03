@@ -2,7 +2,7 @@ import logging
 import math
 import operator
 import random
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cache
 import game
@@ -16,7 +16,10 @@ _log = logging.getLogger()
 # -----------------------------------------------------------------------------
 
 # @cache.cached()
-def expectimax_decision(game_: T_Game, depth: int = -1) -> Dict[str, Any]:
+def expectimax_decision(game_: T_Game,
+                        depth: int = -1,
+                        alpha=-math.inf,
+                        beta=+math.inf) -> Dict[str, Any]:
     try:
         actions = game_.actions()
         if not actions:
@@ -31,25 +34,23 @@ def expectimax_decision(game_: T_Game, depth: int = -1) -> Dict[str, Any]:
             for a in actions:
                 ply = game_.invoke(**a)
                 v = _expectimax_chance_value(ply, depth=depth)
-                _log.debug(f"{a} {v}")
+                _log.debug(f"{a}\tUtility: {v:.2f}")
                 utilities.append((a, v))
 
-            return _optimize_immediate_utility(game_, utilities, operator.gt)
+            # Choose action with best utility if there was not a tie in the 
+            # expected utilities, otherwise do iterative deepening provided
+            # that we're still within reasonable bounds (alpha, beta).
+
+            rv = _best_utility(utilities, operator.gt)
+            if rv is not None:
+                return rv
+            a, v = utilities[0]
+            if v <= alpha or v >= beta:
+                return a
+            return expectimax_decision(game_, depth + 1)
     finally:
-        for n, o in (('expectimax_decision', expectimax_decision),
-                     ('_expectimax_max_value', _expectimax_max_value),
-                     ('_expectimax_chance_value', _expectimax_chance_value)):
-            try:
-                # noinspection PyProtectedMember
-                ch = o._cache
-            except AttributeError:
-                pass
-            else:
-                hit = ch.hit
-                miss = ch.miss
-                _log.debug(f"Cache {n}:\t"
-                           f"Hit: {hit / (hit + miss) * 100:.2f}%\t"
-                           f"Miss: {miss / (hit + miss) * 100:.2f}%")
+        _log.debug(cache.get_stats())
+        cache.reset_stats(module='rules')
 
 
 @cache.cached()
@@ -85,7 +86,10 @@ def _expectimax_chance_value(game_: T_Game, depth: int = -1) -> float:
 # -----------------------------------------------------------------------------
 
 # @cache.cached()
-def minimax_decision(game_: T_Game, depth: int = -1) -> Dict[str, Any]:
+def minimax_decision(game_: T_Game,
+                     depth: int = -1,
+                     alpha=-math.inf,
+                     beta=+math.inf) -> Dict[str, Any]:
     try:
         actions = game_.actions()
         if not actions:
@@ -106,22 +110,20 @@ def minimax_decision(game_: T_Game, depth: int = -1) -> Dict[str, Any]:
             _log.debug(f"{a} {v}")
             utilities.append((a, v))
 
-        return _optimize_immediate_utility(game_, utilities, op)
+        # Choose action with best utility if there was not a tie in the 
+        # expected utilities, otherwise do iterative deepening provided
+        # that we're still within reasonable bounds (alpha, beta).
+
+        rv = _best_utility(utilities, operator.gt)
+        if rv is not None:
+            return rv
+        a, v = utilities[0]
+        if v <= alpha or v >= beta:
+            return a
+        return expectimax_decision(game_, depth + 1)
     finally:
-        for n, o in (('minimax_decision', minimax_decision),
-                     ('_minimax_max_value', _minimax_max_value),
-                     ('_minimax_min_value', _minimax_min_value)):
-            try:
-                # noinspection PyProtectedMember
-                ch = o._cache
-            except AttributeError:
-                pass
-            else:
-                hit = ch.hit
-                miss = ch.miss
-                _log.debug(f"Cache {n}:\t"
-                           f"Hit: {hit / (hit + miss) * 100:.2f}%\t"
-                           f"Miss: {miss / (hit + miss) * 100:.2f}%")
+        _log.debug(cache.get_stats())
+        cache.reset_stats(module='rules')
 
 
 @cache.cached()
@@ -167,29 +169,17 @@ def _minimax_min_value(game_: T_Game,
 # Helpers
 # -----------------------------------------------------------------------------
 
-def _optimize_immediate_utility(game_: T_Game,
-                                utilities: List[Tuple[Dict[str, Any], float]],
-                                cmp: Callable) -> Dict[str, Any]:
-    # Min/maximize immediate utility, if there's a tie in the expectations.
+
+def _best_utility(utilities: List[Tuple[Dict[str, Any], float]],
+                  cmp: Callable,
+                  ) -> Optional[Dict[str, Any]]:
+    rv = None
     best = None
-    ties = None
     for a, v in utilities:
         if best is None or cmp(v, best):
             best = v
-            ties = [a]
+            rv = a
         elif v == best or abs(v - best) <= 0.0001:
-            ties.append(a)
+            return None
 
-    if len(ties) == 1:
-        return ties[0]
-    else:
-        assert len(ties) > 1
-        best = None
-        rv = None
-        for a in ties:
-            ply = game_.invoke(**a)
-            v = ply.utility()
-            if best is None or cmp(v, best):
-                best = v
-                rv = a
-        return rv
+    return rv

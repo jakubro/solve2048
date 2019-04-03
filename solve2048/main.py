@@ -1,15 +1,10 @@
 import argparse
+import datetime
 import logging
 import random
 import sys
 
-import rules
-import search
-
 _log = logging.getLogger()
-
-random.seed(0)
-sys.setrecursionlimit(1500)
 
 
 def main() -> None:
@@ -17,10 +12,10 @@ def main() -> None:
     parser.add_argument(
         'action', choices=['solve', 'play'])
     parser.add_argument(
-        '-ww', '--width', type=int, default=3,
+        '-ww', '--width', type=int, default=4,
         help="Width of the board.")
     parser.add_argument(
-        '-hh', '--height', type=int, default=3,
+        '-hh', '--height', type=int, default=4,
         help="Height of the board.")
     parser.add_argument(
         '-v', '--verbose', action='store_true',
@@ -32,11 +27,25 @@ def main() -> None:
         '--depth', type=int, default=10,
         help="Number of steps to look forward. -1 for unlimited steps.")
     parser.add_argument(
-        '--score', type=int, default=512,
+        '--score', type=int, default=2048,
         help="Game ends when player achieves this score.")
+    parser.add_argument(
+        '--cache-size', type=int, default=None,
+        help="")  # todo
+    parser.add_argument(
+        '--search-algorithm', choices=['expectimax', 'minimax'],
+        default='expectimax',
+        help="")  # todo
 
     args = parser.parse_args()
     setup_logging(args)
+
+    random.seed(0)
+    sys.setrecursionlimit(1500)
+
+    if args.cache_size:
+        import cache
+        cache.CACHE_MAXSIZE = 2 ** args.cache_size
 
     if args.action == 'solve':
         solve(args)
@@ -46,99 +55,89 @@ def main() -> None:
 
 
 def solve(args: argparse.Namespace) -> None:
+    import rules
+    import search
+
     game_ = rules.Game2048.initialize(
-        width=args.width,
-        height=args.height,
+        size=(args.height, args.width),
         terminal_score=args.score)
 
-    depth = args.depth
-
     i = 0
+    dt = None
     while True:
+        print("\n---------------------------------------------")
+        update_statistics(game_, i, dt)
         i += 1
+        dt = datetime.datetime.now()
 
-        utility = game_.utility()
-        score = game_.score()
-        directions = [d['direction'] for d in game_.actions()]
-
-        # max's (AI player) ply
-
-        print(f"\n{game_}")
-        print(f"\nIteration: {i}. Utility: {utility}. Score: {score}. "
-              f"Directions: {[d.name for d in directions]}")
-        if score >= args.score:
-            print(f"\n---------------------------------------------")
+        if game_.score() >= args.score:
+            print("\n---------------------------------------------")
             print("\nAI won!")
             break
 
-        for d in directions:
-            temp = game_.invoke(player=+1, direction=d)
-            _log.info(f"\t{d.name}\t"
-                      f"Utility: {temp.utility()}. Score: {temp.score()}")
-
-        # if i % 10 == 0:
-        #     depth = depth + 1
-        print(f"\nDepth: {depth}")
+        # Max's (AI player) ply
 
         try:
-            # action = search.minimax_decision(game_, depth=depth)
-            action = search.expectimax_decision(game_, depth=depth)
+            if args.search_algorithm == 'expectimax':
+                action = search.expectimax_decision(
+                    game_,
+                    depth=args.depth,
+                    alpha=game_.min_utility(),
+                    beta=game_.max_utility())
+            else:
+                assert args.search_algorithm == 'minimax'
+                action = search.expectimax_decision(
+                    game_,
+                    depth=args.depth,
+                    alpha=game_.min_utility(),
+                    beta=game_.max_utility())
         except KeyboardInterrupt:
             break
         except StopIteration:
-            print(f"\n---------------------------------------------")
+            print("\n---------------------------------------------")
             print("\nAI lost!")
             break
         else:
             print(f"\n{action['direction'].name}")
             game_ = game_.invoke(**action)
 
-        # min's (opponent) ply
+        # Min's (opponent) ply
 
         actions = game_.actions()
         if not actions:
             continue
         game_ = game_.invoke(**random.choice(actions))
 
-        print(f"\n---------------------------------------------")
-
 
 def play(args: argparse.Namespace) -> None:
+    import rules
+
     game_ = rules.Game2048.initialize(
-        width=args.width,
-        height=args.height,
+        size=(args.height, args.width),
         terminal_score=args.score)
 
     i = 0
+    dt = None
     while True:
+        print("\n---------------------------------------------")
+        update_statistics(game_, i, dt)
         i += 1
+        dt = datetime.datetime.now()
 
-        utility = game_.utility()
-        score = game_.score()
-        directions = [d['direction'] for d in game_.actions()]
-
-        print(f"\n{game_}")
-        print(f"\nIteration: {i}. Utility: {utility}. Score: {score}. "
-              f"Directions: {[d.name for d in directions]}")
-        if score >= args.score:
-            print(f"\n---------------------------------------------")
-            print("\nYou won!")
+        if game_.score() >= args.score:
+            print("\n---------------------------------------------")
+            print("You won!")
             break
 
-        for d in directions:
-            temp = game_.invoke(player=+1, direction=d)
-            _log.info(f"\t{d.name}\t"
-                      f"Utility: {temp.utility()}. Score: {temp.score()}")
-
-        # max's (player) ply
+        # Max's (player) ply
 
         actions = game_.actions()
         if not actions:
-            print(f"\n---------------------------------------------")
-            print("\nYou lost!")
+            print("\n---------------------------------------------")
+            print("You lost!")
             break
 
-        print("\nType W for UP, A for LEFT, S for DOWN and D for RIGHT:  ",
+        print("Type W for UP, A for LEFT, S for DOWN and D for RIGHT:  ",
               end='')
         s = input().lower()
         if s == 'w':
@@ -159,14 +158,34 @@ def play(args: argparse.Namespace) -> None:
 
         game_ = game_.invoke(**action)
 
-        # min's (opponent) ply
+        # Min's (opponent) ply
 
         actions = game_.actions()
         if not actions:
             continue
         game_ = game_.invoke(**random.choice(actions))
 
-        print(f"\n---------------------------------------------")
+
+def update_statistics(game_, i, dt):
+    utility = game_.utility()
+    score = game_.score()
+    actions = game_.actions()
+
+    now = datetime.datetime.now()
+    elapsed = (now - dt).total_seconds() if dt else "-"
+
+    print(f"\n{game_}")
+    print(f"\nIteration: {i}. Elapsed: {elapsed}. "
+          f"Utility: {utility:.2f}. Score: {score}. "
+          f"Directions: {[d['direction'].name for d in actions]}")
+
+    for a in actions:
+        d = a['direction']
+        ply = game_.invoke(**a)
+        _log.info(f"\t{d.name}\t"
+                  f"Utility: {ply.utility()}. Score: {ply.score()}")
+
+    print()
 
 
 def setup_logging(args: argparse.Namespace) -> None:
