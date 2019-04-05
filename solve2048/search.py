@@ -8,6 +8,7 @@ import cache
 import game
 
 T_Game = game.Game[Any, int]
+Action = Dict[str, Any]
 
 _log = logging.getLogger()
 
@@ -15,11 +16,14 @@ _log = logging.getLogger()
 # Expectimax
 # -----------------------------------------------------------------------------
 
-# @cache.cached()
+@cache.cached()
 def expectimax_decision(game_: T_Game,
                         depth: int = -1,
                         alpha=-math.inf,
-                        beta=+math.inf) -> Dict[str, Any]:
+                        beta=+math.inf,
+                        maxdepth: int = None) -> Action:
+    maxdepth = maxdepth if maxdepth is not None else depth / 2
+
     try:
         actions = game_.actions()
         if not actions:
@@ -34,12 +38,16 @@ def expectimax_decision(game_: T_Game,
             for a in actions:
                 ply = game_.invoke(**a)
                 v = _expectimax_chance_value(ply, depth=depth)
-                _log.debug(f"{a}\tUtility: {v:.2f}")
+                _log.debug(f"{a}\t"
+                           f"Utility: {v:.2f}\t"
+                           f"Depth: {depth}\t"
+                           f"Max depth: {maxdepth}\t")
                 utilities.append((a, v))
 
-            # Choose action with best utility if there was not a tie in the 
+            # Choose action with best utility if there was not a tie in the
             # expected utilities, otherwise do iterative deepening provided
-            # that we're still within reasonable bounds (alpha, beta).
+            # that we're still within reasonable bounds (alpha, beta), but
+            # prevent recursing too deep by controlling the depth via maxdepth.
 
             rv = _best_utility(utilities, operator.gt)
             if rv is not None:
@@ -47,10 +55,18 @@ def expectimax_decision(game_: T_Game,
             a, v = utilities[0]
             if v <= alpha or v >= beta:
                 return a
-            return expectimax_decision(game_, depth + 1)
+
+            if depth < 0 or maxdepth < 0:
+                return a
+
+            return expectimax_decision(game_,
+                                       depth + 1,
+                                       alpha,
+                                       beta,
+                                       maxdepth - 1)
     finally:
         _log.debug(cache.get_stats())
-        cache.reset_stats(module='rules')
+        # cache.reset_stats(module='rules')
 
 
 @cache.cached()
@@ -85,11 +101,14 @@ def _expectimax_chance_value(game_: T_Game, depth: int = -1) -> float:
 # Minimax
 # -----------------------------------------------------------------------------
 
-# @cache.cached()
+@cache.cached()
 def minimax_decision(game_: T_Game,
                      depth: int = -1,
                      alpha=-math.inf,
-                     beta=+math.inf) -> Dict[str, Any]:
+                     beta=+math.inf,
+                     maxdepth: int = None) -> Action:
+    maxdepth = maxdepth if maxdepth is not None else depth / 2
+
     try:
         actions = game_.actions()
         if not actions:
@@ -107,12 +126,16 @@ def minimax_decision(game_: T_Game,
         for a in actions:
             ply = game_.invoke(**a)
             v = utility(ply, -math.inf, +math.inf, depth=depth)
-            _log.debug(f"{a} {v}")
+            _log.debug(f"{a}\t"
+                       f"Utility: {v:.2f}\t"
+                       f"Depth: {depth}\t"
+                       f"Max depth: {maxdepth}\t")
             utilities.append((a, v))
 
         # Choose action with best utility if there was not a tie in the 
         # expected utilities, otherwise do iterative deepening provided
-        # that we're still within reasonable bounds (alpha, beta).
+        # that we're still within reasonable bounds (alpha, beta), but
+        # prevent recursing too deep by controlling the depth via maxdepth.
 
         rv = _best_utility(utilities, operator.gt)
         if rv is not None:
@@ -120,10 +143,18 @@ def minimax_decision(game_: T_Game,
         a, v = utilities[0]
         if v <= alpha or v >= beta:
             return a
-        return expectimax_decision(game_, depth + 1)
+
+        if depth < 0 or maxdepth < 0:
+            return a
+
+        return minimax_decision(game_,
+                                depth + 1,
+                                alpha,
+                                beta,
+                                maxdepth - 1)
     finally:
         _log.debug(cache.get_stats())
-        cache.reset_stats(module='rules')
+        # cache.reset_stats(module='rules')
 
 
 @cache.cached()
@@ -170,9 +201,8 @@ def _minimax_min_value(game_: T_Game,
 # -----------------------------------------------------------------------------
 
 
-def _best_utility(utilities: List[Tuple[Dict[str, Any], float]],
-                  cmp: Callable,
-                  ) -> Optional[Dict[str, Any]]:
+def _best_utility(utilities: List[Tuple[Action, float]],
+                  cmp: Callable[[float, float], bool]) -> Optional[Action]:
     rv = None
     best = None
     for a, v in utilities:

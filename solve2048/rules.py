@@ -56,7 +56,7 @@ class Game2048(game.Game[Board, Player]):
                                           self.player,
                                           self.size,
                                           self.terminal_score))
-        return rv
+            return rv
 
     # Heuristics
     # -------------------------------------------------------------------------
@@ -75,37 +75,44 @@ class Game2048(game.Game[Board, Player]):
 
     # @cache.cached()
     def utility(self) -> float:
-        if self.score() >= self.terminal_score:
+        score = self.score()
+
+        if score >= self.terminal_score:
             return self.max_utility()
 
         if not self.actions():
             return self.min_utility()
 
-        powers = [int(math.log(x or 1, 2)) for _, x in self._board_as_snake()]
-        inversions = self._count_inversions(tuple(powers))
+        rv = []
+        for d in (Direction.RIGHT, Direction.DOWN):
+            trail = self._board_as_snake(self.size, d)
+            powers = [int(math.log(self.state[p] or 1, 2)) for p in trail]
+            v = self._utility(powers)
+            rv.append(v)
 
-        score = self.score()
+        return max(rv)
 
-        return inversions * score  # * log_score
-
-    def _count_inversions(self, arr: tuple) -> int:
+    @classmethod
+    def _utility(cls, arr: List) -> int:
+        maxlen = len(arr)
         rv = 0
-        add = True
         for i, a in enumerate(arr):
-            for j, b in enumerate(arr):
-                if i < j:
-                    if a < b:
-                        q = (len(arr) - i) * (len(arr) - j) * b ** 2
-                        rv -= q
-                        add = False
-                if i == j - 1:
-                    if a == b + 1:
-                        q = (len(arr) - i) * (len(arr) - j) * a ** 2
-                        rv += q if add else -q
+            if i + 1 < maxlen:
+                b = arr[i + 1]
+
+                s = +1 if a >= b else -1
+
+                # Fix most of the mass near the (top, left) corner.
+                w = maxlen - i
+
+                # Drive distances between tile values to 1.
+                d = maxlen - abs(1 - max(0.5, abs(a - b)))
+
+                rv += s * w * d * (a + 1) * (b + 1)
         return rv
 
     def min_utility(self) -> float:
-        return - (10 ** (math.log(self.terminal_score, 2) + 10))
+        return - self.max_utility()
 
     def max_utility(self) -> float:
         return 10 ** (math.log(self.terminal_score, 2) + 10)
@@ -140,15 +147,18 @@ class Game2048(game.Game[Board, Player]):
     def _can_invoke_min(self, **kwargs) -> bool:
         if kwargs['player'] != -1:
             return False
+
         position: Position = kwargs['position']
+
         return self.state[position] is None
 
     def _can_invoke_max(self, **kwargs) -> bool:
         if kwargs['player'] != +1:
             return False
+
         direction: Direction = kwargs['direction']
-        height, width = self.size
-        for row in self._rotate_board(height, width, direction):
+
+        for row in self._rotate_board(self.size, direction):
             previous = Ellipsis  # value of the last visited tile
             previous_non_empty = Ellipsis
             for pos in row:
@@ -206,8 +216,7 @@ class Game2048(game.Game[Board, Player]):
         """Move non-empty tile along the desired direction, while the empty
         tiles vanish."""
 
-        height, width = self.size
-        for row in self._rotate_board(height, width, direction):
+        for row in self._rotate_board(self.size, direction):
             empty = []  # queue of visited empty tiles
             for pos in row:
                 current = state[pos]
@@ -225,16 +234,15 @@ class Game2048(game.Game[Board, Player]):
         put on the position of the first tile, while the other tile is left
         empty."""
 
-        height, width = self.size
-        for row in self._rotate_board(height, width, direction):
+        for row in self._rotate_board(self.size, direction):
             previous = None  # value of the last visited tile
             prev_pos = None  # .. and its position
             for pos in row:
                 current = state[pos]
 
                 if current is not None and current == previous:
-                    state[prev_pos] = current = previous * 2
-                    state[pos] = None
+                    state[prev_pos] = previous * 2
+                    state[pos] = current = None
 
                 previous = current
                 prev_pos = pos
@@ -242,32 +250,40 @@ class Game2048(game.Game[Board, Player]):
     # Board Iterators
     # -------------------------------------------------------------------------
 
-    @cache.cached()
-    def _board_as_snake(self) -> List[Tuple[Position, int]]:
+    @classmethod
+    @cache.cached(maxsize=len(Direction))
+    def _board_as_snake(cls,
+                        size: Size,
+                        direction: Direction) -> List[Position]:
         # iterate through the board as snake, i.e.
         # 0 1 2
         # 5 4 3
         # 6 7 8
 
-        height, width = self.size
+        height, width = size
+
+        r1 = [(x, 0) for x in range(height)]
+        r2 = [(0, x) for x in range(width)]
+
+        if direction in (Direction.UP, Direction.DOWN):
+            r1, r2 = r2, r1
+
+        if direction in (Direction.LEFT, Direction.UP):
+            r2 = list(reversed(r2))
+
         rv = []
-        reverse = False
-        for i in range(height):
-            start = width - 1 if reverse else 0
-            stop = -1 if reverse else width
-            step = -1 if reverse else +1
-            for j in range(start, stop, step):
-                pos = (i, j)
-                val = self.state[pos]
-                rv.append((pos, val))
-            reverse = not reverse
+        for i1, j1 in r1:
+            for i2, j2 in r2:
+                i = i1 + i2
+                j = j1 + j2
+                rv.append((i, j))
+            r2 = list(reversed(r2))
         return rv
 
     @classmethod
-    @cache.cached()
+    @cache.cached(maxsize=len(Direction))
     def _rotate_board(cls,
-                      height: int,
-                      width: int,
+                      size: Size,
                       direction: Direction) -> List[List[Position]]:
         """
         :param direction: Direction in which to move all the tile on the board.
@@ -297,6 +313,8 @@ class Game2048(game.Game[Board, Player]):
           (0, 0) (0, 1) (0, 2)
           (1, 0) (1, 1) (1, 2)
         """
+
+        height, width = size
 
         r1 = [(x, 0) for x in range(height)]
         r2 = [(0, x) for x in range(width)]
@@ -353,8 +371,7 @@ class Game2048(game.Game[Board, Player]):
 
     @classmethod
     def initialize(cls, **kwargs) -> 'Game2048':
-        # size of the board
-        height, width = kwargs['size']
+        height, width = kwargs['size']  # size of the board
         state = {(i, j): None for i in range(height) for j in range(width)}
         rv = Game2048(state, player=-1, **kwargs)
         rv = rv.invoke(**random.choice(rv.actions()))

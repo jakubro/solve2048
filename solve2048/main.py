@@ -12,10 +12,10 @@ def main() -> None:
     parser.add_argument(
         'action', choices=['solve', 'play'])
     parser.add_argument(
-        '-ww', '--width', type=int, default=4,
+        '-ww', '--width', type=int, default=3,  # 4
         help="Width of the board.")
     parser.add_argument(
-        '-hh', '--height', type=int, default=4,
+        '-hh', '--height', type=int, default=3,  # 4
         help="Height of the board.")
     parser.add_argument(
         '-v', '--verbose', action='store_true',
@@ -24,18 +24,18 @@ def main() -> None:
         '-vv', '--debug', action='store_true',
         help="Be even more verbose.")
     parser.add_argument(
-        '--depth', type=int, default=10,
+        '--depth', type=int, default=5,  # 6
         help="Number of steps to look forward. -1 for unlimited steps.")
     parser.add_argument(
-        '--score', type=int, default=2048,
+        '--score', type=int, default=512,  # 2048
         help="Game ends when player achieves this score.")
     parser.add_argument(
-        '--cache-size', type=int, default=None,
-        help="")  # todo
+        '--cache-size', type=int, default=None,  # 32
+        help="Cache size. (Actual cache size is 2 ** cache_size)")
     parser.add_argument(
         '--search-algorithm', choices=['expectimax', 'minimax'],
         default='expectimax',
-        help="")  # todo
+        help="Search algorithm")
 
     args = parser.parse_args()
     setup_logging(args)

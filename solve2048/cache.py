@@ -1,15 +1,18 @@
-from typing import Any, Callable
+from typing import Any, Callable, Iterator, List, Tuple
 
 import cachetools
 
+import utils
+
 CACHE_ENABLED = True
-CACHE_MAXSIZE = 256
+CACHE_MAXSIZE = 2 ** 32
 
 _caches = {}
 
 
 def cached(maxsize: int = None, key: Callable = None, group: Any = None):
-    maxsize = CACHE_MAXSIZE
+    maxsize = maxsize or CACHE_MAXSIZE
+    key = key or _cachekey
 
     def outer(func):
         if CACHE_ENABLED:
@@ -22,7 +25,7 @@ def cached(maxsize: int = None, key: Callable = None, group: Any = None):
                 module=module,
                 name=name)
 
-            @cachetools.cached(cache, key=key or _cachekey)
+            @cachetools.cached(cache, key=key)
             def inner(*args, **kwargs):
                 return func(*args, **kwargs)
 
@@ -33,7 +36,7 @@ def cached(maxsize: int = None, key: Callable = None, group: Any = None):
     return outer
 
 
-class StatisticsCache(cachetools.LRUCache):
+class StatisticsCache(cachetools.RRCache):
     def __init__(self,
                  *args,
                  group: Any = None,
@@ -58,14 +61,36 @@ class StatisticsCache(cachetools.LRUCache):
             return rv
 
     def reset_stats(self) -> None:
-        self.hit = 0
-        self.miss = 0
+        self.hit = self.miss = 0
+
+    def get_stats(self) -> List[str]:
+        hit = self.hit
+        miss = self.miss
+        total = (hit + miss) or 0.001
+        size = len(self)
+
+        return [f"Cache: {self.module + '.' + self.name}",
+                f"Hit: {hit / total * 100 :.2f}%",
+                f"Miss: {miss / total * 100:.2f}%",
+                f"Capacity: {size / self.maxsize * 100:.2f}%",
+                f"Size: {size}"]
 
 
-def get_stats(group: Any = None,
-              module: str = None,
-              name: str = None) -> str:
-    rv = ""
+def get_stats(**filters) -> str:
+    table = []
+    for _, v in _iter_caches(**filters):
+        table.append(v.get_stats())
+    return utils.justify_table(table)
+
+
+def reset_stats(**filters) -> None:
+    for _, v in _iter_caches(**filters):
+        v.reset_stats()
+
+
+def _iter_caches(group: Any = None,
+                 module: str = None,
+                 name: str = None) -> Iterator[Tuple[str, StatisticsCache]]:
     for k, v in _caches.items():
         if group is not None and v.group != group:
             continue
@@ -73,29 +98,7 @@ def get_stats(group: Any = None,
             continue
         if name is not None and v.name != name:
             continue
-
-        hit = v.hit
-        miss = v.miss
-        total = (hit + miss) or 0.001
-
-        rv += (f"Cache: {k}:\t"
-               f"Hit: {hit / total * 100 :.2f}%\t"
-               f"Miss: {miss / total * 100:.2f}%\n")
-    return rv
-
-
-def reset_stats(group: Any = None,
-                module: str = None,
-                name: str = None) -> None:
-    for v in _caches.values():
-        if group is not None and v.group != group:
-            continue
-        if module is not None and v.module != module:
-            continue
-        if name is not None and v.name != name:
-            continue
-
-        v.reset_stats()
+        yield k, v
 
 
 def _cachekey(*args, **kwargs):
